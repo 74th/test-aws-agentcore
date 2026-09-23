@@ -6,7 +6,7 @@
 
 ## What Changes
 
-- `agent/` に Claude Agent SDK を起動するコンテナと、コンテナ内の検証用 skill を用意する。Claude Haiku 4.5 は Amazon Bedrock 経由で呼び出す。
+- `agent/` に Claude Agent SDK を起動するコンテナと、コンテナ内の検証用 skill を用意する。Claude Haiku 4.5 は Anthropic API 経由で呼び出し、API key は AgentCore Identity に保管する。
 - `agent/` の image を `linux/arm64` でビルドし、AgentCore Runtime の microVM compute type で実行する。ARM64 ビルドは Docker Sandbox 外の対応する Docker 環境で行う。
 - `terraform/` に AgentCore Runtime、Gateway と GitHub MCP target、Memory、セッションストレージ、VPC と送信制御、必要な IAM・エンドポイントを定義する。
 - `cli/` に `InvokeAgentRuntime` でセッション ID を指定して対話・検証できる CLI を用意する。
@@ -17,7 +17,7 @@
 
 ### New Capabilities
 
-- `claude-agent-runtime`: AgentCore Runtime 上で動く Claude Agent SDK コンテナ、Bedrock モデル、skill と呼び出し CLI。
+- `claude-agent-runtime`: AgentCore Runtime 上で動く Claude Agent SDK コンテナ、Anthropic API モデル、skill と呼び出し CLI。
 - `github-mcp-gateway`: Gateway が GitHub MCP の認証を付与し、エージェントへツールを公開する機能。
 - `session-continuity`: AgentCore Memory とセッションストレージを用いた会話履歴・ワークスペースの継続とセッション分離。
 - `controlled-egress`: Runtime からの外部 HTTPS 通信を許可ドメインへ制限する VPC 構成と検証。
@@ -28,4 +28,4 @@
 
 ## Impact
 
-新規の `agent/`、`terraform/`、`cli/`、AWS アカウントの AgentCore・Bedrock・VPC・Network Firewall・ECR・IAM リソースに影響する。GitHub MCP の認証情報と、Bedrock の Claude Haiku 4.5 利用権限が必要。Runtime のセッションストレージは AWS 文書上 Preview であり、リージョンと Terraform AWS provider の対応を実装時に確認する。ARM64 image のビルドには Docker Sandbox 外の対応環境が必要。
+新規の `agent/`、`terraform/`、`cli/`、AWS アカウントの AgentCore・Identity・VPC・Network Firewall・ECR・IAM リソースに影響する。GitHub MCP の認証情報と Anthropic API key が必要だが、Bedrock のモデル利用権限は前提としない。Runtime のセッションストレージは AWS 文書上 Preview であり、リージョンと Terraform AWS provider の対応を実装時に確認する。ARM64 image のビルドには Docker Sandbox 外の対応環境が必要。

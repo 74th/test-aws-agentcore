@@ -1,0 +1,9 @@
+aws_region                     = "us-west-2"
+name_prefix                    = "claude-feasibility"
+enable_session_storage         = true
+agent_image_uri                = "000000000000.dkr.ecr.us-west-2.amazonaws.com/claude-feasibility:arm64"
+github_credential_provider_arn = "arn:aws:bedrock-agentcore:us-west-2:000000000000:token-vault/default/apikeycredentialprovider/github-readonly"
+github_api_key_secret_arn      = "arn:aws:secretsmanager:us-west-2:000000000000:secret:github-readonly-example"
+anthropic_api_key_provider_name = "anthropic-claude"
+anthropic_api_key_provider_arn = "arn:aws:bedrock-agentcore:us-west-2:000000000000:token-vault/default/apikeycredentialprovider/anthropic-claude"
+anthropic_api_key_secret_arn    = "arn:aws:secretsmanager:us-west-2:000000000000:secret:anthropic-claude-example"

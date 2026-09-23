@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+terraform/terraform.tfvars
+terraform/crash.log

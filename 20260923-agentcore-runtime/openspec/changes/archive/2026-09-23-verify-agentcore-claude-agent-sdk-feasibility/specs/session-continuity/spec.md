@@ -13,6 +13,13 @@ CLI は同じ Runtime セッション ID を指定した再呼び出しを許可
 - **WHEN** 1 回目の CLI 呼び出しで検証用の事実を伝え、2 回目の別プロセスから同じセッション ID でその事実を質問する
 - **THEN** エージェントは前回の事実を答え、対応するユーザー・アシスタントのターンが Memory から取得できる
 
+#### Scenario: Memory イベントだけを使ったアイドル終了後の会話再開
+- **WHEN** session storage を無効にした Runtime で検証用の固有事実を会話し、アイドルタイムアウト後に同じ Runtime session ID で新しい実行環境を起動する
+- **AND** エージェントが `actorId` と Runtime `sessionId` を指定して AgentCore Memory のイベントを取得し、新しい SDK 会話のコンテキストとして渡す
+- **THEN** `instance_id` が切り替わった状態でエージェントは固有事実を答え、SDK の以前の session ID や workspace の永続データを使わずに会話を継続できる
+
+このシナリオは短期会話イベントの保存・取得を検証し、長期 Memory strategy による抽出・意味検索とは区別する。
+
 #### Scenario: 異なるセッション ID
 - **WHEN** 別のセッション ID で同じ質問をする
 - **THEN** 前のセッションの会話内容は引き継がれない

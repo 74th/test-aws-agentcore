@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Runtime の VPC 経由の外部 HTTPS 通信を許可先のホストに絞り、許可先の GitHub ページは取得でき、拒否先のページは取得できないことを検証する。
+Runtime の VPC 経由の外部 HTTPS 通信を許可先のホスト (`github.com` と推論用 `api.anthropic.com`) に絞り、許可先の GitHub ページは取得でき、拒否先のページは取得できないことを検証する。
 
 ## ADDED Requirements
 
@@ -26,4 +26,4 @@ Runtime の外部宛て通信は送信制御を通過し、直接 IP 接続や�
 
 #### Scenario: AWS サービスの継続利用
 - **WHEN** 送信制御を有効にしてエージェントを呼び出す
-- **THEN** Bedrock 推論、Memory、Gateway 接続とセッションストレージ同期が利用できる
+- **THEN** Anthropic API 推論、Memory、Gateway 接続とセッションストレージ同期が利用できる

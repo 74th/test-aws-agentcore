@@ -23,13 +23,15 @@ AWS の [Runtime HTTP 契約](https://docs.aws.amazon.com/bedrock-agentcore/late
 
 ## Decisions
 
-### 1. Python の Claude Agent SDK を Runtime の HTTP コンテナに入れる
+### 1. Python の Claude Agent SDK を Runtime の HTTP コンテナに入れ、Anthropic API を使う
 
 `agent/` は Python の Claude Agent SDK と Claude Code 実行バイナリを ARM64 イメージへ組み込み、HTTP 契約を実装する。`/invocations` は Runtime が渡すセッション ID を受け、プロンプトと診断コマンドを処理する。CLI は boto3 の `InvokeAgentRuntime` を使い、初回 ID を表示、次回に同じ ID を受け取る。`/ping` は実行状態を反映する。これは AWS の [独自コンテナ契約](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-http-protocol-contract.html) に一致する。AgentCore 専用フレームワークへ置き換える案は、Claude Agent SDK 自体の成立を確かめる目的に合わない。
 
 開発中のコードと HTTP 契約はコンテナを起動せずに確認する。配備用 image は Docker Sandbox 外の ARM64 対応 Docker 環境で人が `docker buildx build --platform linux/arm64` を実行して ECR に push する。`agent/` にその再現可能なコマンドと image の architecture を確認する手順を置き、Terraform には push 済み image URI を入力する。Docker Sandbox 内でのコンテナ実行、および EC2 Instances 型への変更は計画に含めない。[AWS の compute type 比較](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-how-it-works.html)では microVM は `arm64`、Instances は `x86_64` も使えるが、今回重視する microVM の実行特性を確認するためである。
 
-Claude Code の Bedrock モードを `CLAUDE_CODE_USE_BEDROCK=1`、主モデルを `us.anthropic.claude-haiku-4-5-20251001-v1:0`（リージョンに応じて設定可能）で固定し、SDK の `model` にも同じ ID を渡す。[Anthropic の Bedrock 設定](https://code.claude.com/docs/en/amazon-bedrock)と[AWS の Haiku 4.5 モデルカード](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html)に従う。`bedrock-runtime` のこのモデルは bare model ID ではなく geo/global inference profile を使う。リージョンは既定で `us-west-2` とし、モデル利用権限・推論先リージョンの IAM を事前確認する。モデル alias に任せる案は別モデルへの暗黙の切り替えがあり得るため採らない。
+Bedrock のアカウント entitlement が利用できないため、Claude Haiku 4.5 は Anthropic API から直接呼び出す。SDK の `model` は `claude-haiku-4-5-20251001` に固定する。API key は AgentCore Identity の API key provider (`anthropic-claude`) に保存し、`@requires_api_key` で取得して SDK subprocess の環境へ渡す。Terraform variables、Runtime environment、CLI 入出力、ログには key の値を含めない。Runtime IAM は該当 provider への `GetResourceApiKey` に限定する。AWS Bedrock Runtime endpoint と `bedrock:InvokeModel` は不要となり、Runtime の Firewall は推論先 `api.anthropic.com` を許可する。
+
+API key provider の作成は hidden prompt を使う別 CLI helper で行い、Terraform state に秘密値を含めない。Claude Code の非必須 telemetry と error reporting は無効にし、外向き通信先を Anthropic API と GitHub のみに保つ。
 
 検証用 skill は `/opt/agent/.claude/skills/` に置き、SDK の `cwd=/opt/agent`、`setting_sources=["project"]`、Skill ツールを有効にする。[Anthropic の skill 手順](https://code.claude.com/docs/en/agent-sdk/skills)どおり、初期化メッセージの `skills` と明示呼び出しの出力で二段階確認する。分析用の実資産が渡されたら同じ配置規則で置き換える。
 
@@ -43,13 +45,15 @@ Claude Agent SDK の HTTP MCP 設定は静的 header を受けるが、SigV4 は
 
 AgentCore Memory にはユーザー・アシスタントの会話ターンを `actorId` と Runtime `sessionId` で記録・取得する。一方、Claude Agent SDK の `resume` が読むのは SDK の transcript であり、Memory にターンを書くだけでは SDK の内部状態を再開できない。[Anthropic の sessions](https://code.claude.com/docs/en/agent-sdk/sessions)は transcript ファイルまたは SessionStore を要求する。今回の最小構成では `CLAUDE_CONFIG_DIR` を `/mnt/workspace/.claude-config` に置き、SDK session ID を同じマウント内の対応表へ保存する。再呼び出し時にその ID を `resume` へ渡す。`cwd` は固定する。別の SessionStore 実装を用いる案は追加の保存基盤と実装量が必要なので採らない。
 
+Memory の独立性を確かめる追加シナリオでは session storage を無効にし、SDK の過去 session ID を使わない。新しい実行環境で短期 Memory の `ListEvents` を `actorId` と Runtime `sessionId` で読み、USER/ASSISTANT の会話履歴を新規 SDK 会話の入力コンテキストに組み立てる。これにより workspace 上の SDK transcript と Memory 経由の会話再開を分離して試す。現在の Memory resource は短期イベント用で長期抽出 strategy を設定していないため、このテストは生の会話イベント取得・利用に限定し、semantic memory の検証とはしない。
+
 `/mnt/workspace` には [AgentCore の managed session storage](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)を設定する。これは microVM ごとの分離と stop/resume 後の復元を AWS が文書化しているが Preview で、14 日間の非使用や Runtime version 更新で消える。Memory と作業ファイルを長期保存する要件には使わない。停止 API の完了後に再開し、会話とファイルの両方を確認する。EFS を使う案は永続期間が長い一方、セッション分離用のディレクトリ制御を自前で持つ必要がある。
 
 ### 4. VPC の外部通信を Network Firewall へ通す
 
 Runtime は private subnet に置き、外向きの既定経路を同じ AZ の Network Firewall endpoint、次に NAT gateway と Internet Gateway へ通す。戻り経路も対称にする。Firewall の TLS SNI / HTTP Host allowlist と既定拒否を組み合わせ、`github.com` を許可し `www.tohoho-web.com` を拒否する。Security Group だけではドメイン名を判定できない。[Network Firewall のドメイン規則](https://docs.aws.amazon.com/network-firewall/latest/developerguide/stateful-rule-groups-domain-names.html)と[評価順序](https://docs.aws.amazon.com/network-firewall/latest/developerguide/suricata-rule-evaluation-order.html)に従い、TLS ハンドシェイクが通る状態で SNI を判定する。直接 IP、UDP/443、名前を識別できない TLS は拒否する。許可範囲は FQDN 単位で、`/74th` だけを許可する機能ではない。
 
-Bedrock 推論には `bedrock-runtime`、AgentCore Memory には data-plane、Gateway には gateway の interface VPC endpoint と private DNS を設ける。[Bedrock PrivateLink](https://docs.aws.amazon.com/bedrock/latest/userguide/vpc-interface-endpoints.html)と[AgentCore PrivateLink](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/vpc-interface-endpoints.html)を使用し、ECR API/DKR、CloudWatch Logs の interface endpoint と S3 gateway endpoint を加える。VPC モードのセッションストレージ同期にも [S3 への経路](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)が必要。AWS サービスの通信を単純な公開 FQDN allowlist に混ぜる案は、必要ホストが増えやすく検証しにくいため採らない。
+AgentCore Identity、Memory、Gateway に `bedrock-agentcore` / control plane の interface VPC endpoint と private DNS を設け、ECR API/DKR、CloudWatch Logs と S3 gateway endpoint を加える。[AgentCore PrivateLink](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/vpc-interface-endpoints.html)を使用する。VPC モードのセッションストレージ同期にも [S3 への経路](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-filesystem-configurations.html)が必要。Anthropic API は公開 HTTPS endpoint `api.anthropic.com` を Firewall allowlist に追加する。AWS サービス通信は private endpoint 経由とし、外向き FQDN allowlist へ混ぜない。
 
 Gateway から GitHub MCP への outbound は Gateway サービス側の経路であり、Runtime の Network Firewall では制御されない。`https://github.com/74th` の取得検証は必ず Runtime コンテナ内から行い、MCP 経由の GitHub 取得とは別に結果を記録する。
 
@@ -71,8 +75,8 @@ Gateway から GitHub MCP への outbound は Gateway サービス側の経路�
 
 ## Migration Plan
 
-1. AWS アカウントの権限、利用リージョン、Bedrock モデル利用、Session storage の対応を確認する。
-2. 読み取り専用 GitHub token を Gateway credential provider に登録し、ARN を得る。人が Docker Sandbox 外の対応環境で `linux/arm64` image をビルドし、architecture を確認して ECR へ push する。
+1. AWS アカウントの権限、利用リージョン、AgentCore Identity、Session storage の対応を確認する。Anthropic API key provider が必要で、Bedrock model entitlement は不要とする。
+2. Anthropic API key と読み取り専用 GitHub token をそれぞれ AgentCore Identity credential provider に登録し、Anthropic provider 名と GitHub provider ARN を得る。人が Docker Sandbox 外の対応環境で `linux/arm64` image をビルドし、architecture を確認して ECR へ push する。
 3. Terraform で VPC、endpoints、Firewall、Memory、Gateway、Runtime を作成し、Gateway target の同期完了を待つ。
 4. CLI から基本対話、skill、MCP、同一・別セッション、stop/resume、HTTPS 許可・拒否・迂回を実行し、観測結果を記録する。
 5. 検証後は token credential と Terraform 管理リソースを削除できるようにする。途中失敗時も同じ手順でロールバックする。
